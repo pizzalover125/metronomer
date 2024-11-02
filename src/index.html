@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap" rel="stylesheet">
+    <title>Metronome</title>
+    <style>
+        * {
+            font-family: "Poppins", sans-serif;
+            font-weight: 600;
+            user-select: none;
+        }
+        
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background: #111111;
+            color: #ffffff;
+        }
+
+        .encoder {
+            position: relative;
+            width: 200px;
+            height: 200px;
+            background: #1a1a1a;
+            border-radius: 50%;
+            box-shadow: 0 4px 25px rgba(0, 157, 255, 0.1);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 20px;
+        }
+
+        .knob-indicator {
+            position: absolute;
+            width: 3px;
+            height: 15px;
+            background: #00a8ff;
+            top: 10px;
+            left: 50%;
+            margin-left: -1.5px;
+            border-radius: 4px;
+            transform-origin: 50% 90px;
+            box-shadow: 0 0 15px rgba(0, 168, 255, 0.6);
+        }
+
+        .progress-ring {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform: rotate(-90deg);
+        }
+
+        .progress-ring circle {
+            fill: none;
+            stroke: #00a8ff;
+            stroke-width: 2;
+            stroke-linecap: round;
+            filter: drop-shadow(0 0 8px rgba(0, 168, 255, 0.6));
+        }
+
+        .bpm-display {
+            font-size: 4.4em;
+            color: #ffffff;
+            z-index: 1;
+            text-shadow: 0 0 20px rgba(0, 168, 255, 0.3);
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .bpm-display:hover {
+            color: #00a8ff;
+        }
+
+        .bpm-input {
+            font-size: 2.8em;
+            background: transparent;
+            border: none;
+            color: #00a8ff;
+            width: 100px;
+            text-align: center;
+            font-family: "Poppins", sans-serif;
+            font-weight: 600;
+            outline: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .bpm-input::-webkit-inner-spin-button,
+        .bpm-input::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        .label {
+            position: absolute;
+            bottom: -35px;
+            font-size: 0.9em;
+            color: #ffffff;
+            letter-spacing: 1px;
+        }
+
+        .encoder::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border-radius: 50%;
+            background: linear-gradient(145deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 100%);
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="encoder">
+        <svg class="progress-ring">
+            <circle cx="100" cy="100" r="90" stroke-dasharray="565.49" stroke-dashoffset="0"/>
+        </svg>
+        <div class="knob-indicator"></div>
+        <div class="bpm-display">60</div>
+        <div class="label">BPM</div>
+    </div>
+
+    <script>
+        const get = str => document.querySelector(str);
+        const wait = seconds => new Promise(r => setTimeout(r, seconds * 1e3));
+
+        const context = new AudioContext();
+        let cntr = 0;
+        const makeSound = () => {
+            const sound = context.createOscillator();
+            const fourthBeat = cntr++ % 4 === 0;
+            sound.frequency.value = fourthBeat ? 400 : 440;
+            sound.connect(context.destination);
+            sound.start(context.currentTime);
+            sound.stop(context.currentTime + .1);
+        };
+
+        let bpm = 60;
+        const encoder = get('.encoder');
+        const bpmDisplay = get('.bpm-display');
+        const knobIndicator = get('.knob-indicator');
+        const progressRing = get('.progress-ring circle');
+        const circumference = 2 * Math.PI * 90;
+        let isDragging = false;
+        let lastX = 0;
+        let lastY = 0;
+        let sensitivity = 0.6;
+        let rotationAngle = 0;
+        let lastBeatTime = 0;
+
+        progressRing.style.strokeDasharray = circumference;
+
+        const updateBpm = (newBpm) => {
+            newBpm = Math.round(newBpm * 2) / 2;
+            bpm = Math.min(Math.max(30, newBpm), 240);
+            bpmDisplay.textContent = Math.round(bpm);
+            rotationAngle = ((bpm - 30) / (240 - 30)) * 360;
+            knobIndicator.style.transform = `rotate(${rotationAngle}deg)`;
+        };
+
+        const updateProgress = (timestamp) => {
+            if (!lastBeatTime) lastBeatTime = timestamp;
+            const beatDuration = 60000 / bpm;
+            const elapsed = timestamp - lastBeatTime;
+            const progress = (elapsed % beatDuration) / beatDuration;
+            const offset = circumference * (1 - progress);
+            progressRing.style.strokeDashoffset = offset;
+            requestAnimationFrame(updateProgress);
+        };
+
+        const getAngle = (x, y, rect) => {
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            return Math.atan2(y - centerY, x - centerX);
+        };
+
+        let lastTap = 0;
+        const DOUBLE_TAP_DELAY = 300;
+
+        const createBpmInput = () => {
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.className = 'bpm-input';
+            input.value = Math.round(bpm);
+            input.min = 30;
+            input.max = 240;
+            input.addEventListener('blur', () => {
+                const newBpm = parseFloat(input.value);
+                if (!isNaN(newBpm) && newBpm >= 30 && newBpm <= 240) {
+                    updateBpm(newBpm);
+                }
+                input.remove();
+                bpmDisplay.style.display = 'block';
+            });
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    input.blur();
+                }
+                if (e.key === 'Escape') {
+                    input.remove();
+                    bpmDisplay.style.display = 'block';
+                }
+            });
+            return input;
+        };
+
+        bpmDisplay.addEventListener('touchstart', (e) => {
+            const now = Date.now();
+            if (now - lastTap < DOUBLE_TAP_DELAY) {
+                e.preventDefault();
+                bpmDisplay.style.display = 'none';
+                const input = createBpmInput();
+                encoder.insertBefore(input, bpmDisplay);
+                input.focus();
+                input.select();
+            }
+            lastTap = now;
+        });
+
+        bpmDisplay.addEventListener('dblclick', (e) => {
+            bpmDisplay.style.display = 'none';
+            const input = createBpmInput();
+            encoder.insertBefore(input, bpmDisplay);
+            input.focus();
+            input.select();
+        });
+
+        encoder.addEventListener('mousedown', (e) => {
+            if (e.target === bpmDisplay || e.target.classList.contains('bpm-input')) return;
+            isDragging = true;
+            lastX = e.clientX;
+            lastY = e.clientY;
+            encoder.style.cursor = 'grabbing';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            
+            const rect = encoder.getBoundingClientRect();
+            const lastAngle = getAngle(lastX, lastY, rect);
+            const newAngle = getAngle(e.clientX, e.clientY, rect);
+            
+            let deltaAngle = (newAngle - lastAngle) * (180 / Math.PI);
+            
+            if (deltaAngle > 180) deltaAngle -= 360;
+            if (deltaAngle < -180) deltaAngle += 360;
+            
+            updateBpm(bpm + deltaAngle * sensitivity);
+            
+            lastX = e.clientX;
+            lastY = e.clientY;
+        });
+
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+            encoder.style.cursor = 'pointer';
+        });
+
+        encoder.addEventListener('touchstart', (e) => {
+            if (e.target === bpmDisplay || e.target.classList.contains('bpm-input')) return;
+            isDragging = true;
+            lastX = e.touches[0].clientX;
+            lastY = e.touches[0].clientY;
+            e.preventDefault();
+        });
+
+        document.addEventListener('touchmove', (e) => {
+            if (!isDragging) return;
+            
+            const rect = encoder.getBoundingClientRect();
+            const lastAngle = getAngle(lastX, lastY, rect);
+            const newAngle = getAngle(e.touches[0].clientX, e.touches[0].clientY, rect);
+            
+            let deltaAngle = (newAngle - lastAngle) * (180 / Math.PI);
+            
+            if (deltaAngle > 180) deltaAngle -= 360;
+            if (deltaAngle < -180) deltaAngle += 360;
+            
+            updateBpm(bpm + deltaAngle * sensitivity);
+            
+            lastX = e.touches[0].clientX;
+            lastY = e.touches[0].clientY;
+            e.preventDefault();
+        });
+
+        document.addEventListener('touchend', () => {
+            isDragging = false;
+        });
+
+        encoder.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const wheelSensitivity = 2;
+            updateBpm(bpm + Math.sign(e.deltaY) * wheelSensitivity);
+        });
+
+        let running = true;
+        const startMetronome = async () => {
+            while (running) {
+                makeSound();
+                lastBeatTime = performance.now();
+                await wait(60 / bpm);
+            }
+        };
+
+        requestAnimationFrame(updateProgress);
+        startMetronome();
+        updateBpm(60);
+    </script>
+</body>
+</html>
